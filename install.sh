@@ -114,7 +114,7 @@ install_asdf() {
     tool="${line%% *}"
     if ! asdf plugin list | grep -qx "$tool"; then
       info "Додаю asdf-плагін $tool..."
-      asdf plugin add "$tool"
+      asdf plugin add "$tool" || warn "Не вдалося додати плагін $tool"
     fi
   done < "$TOOL_VERSIONS"
 
