@@ -1,0 +1,4 @@
+# Зовнішні плагіни zsh: GitHub-репо, які клонуються у ~/.oh-my-zsh/custom/plugins
+# та додаються до plugins=(...) у ~/.zshrc
+zsh-users/zsh-autosuggestions
+zsh-users/zsh-syntax-highlighting

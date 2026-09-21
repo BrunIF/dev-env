@@ -24,6 +24,7 @@ RUN_GITLAB=false
 RUN_GIT=false
 RUN_UV=false
 RUN_CUSTOM=false
+RUN_ZSH=false
 
 usage() {
   cat <<EOF
@@ -41,6 +42,7 @@ Sources:
   --git      git pull у клонованих репозиторіях (config/git.txt)
   --uv       uv tool upgrade --all
   --custom   перекопіювати custom-bin/ у /usr/local/bin
+  --zsh      оновити Oh My Zsh та плагіни (config/zsh-*)
   --all      оновити всі джерела
   -h, --help показати цю підказку
 EOF
@@ -49,7 +51,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --all)    RUN_APT=true; RUN_ASDF=true; RUN_BREW=true; RUN_NVM=true
-              RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true ;;
+              RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true; RUN_ZSH=true ;;
     --apt)    RUN_APT=true ;;
     --asdf)   RUN_ASDF=true ;;
     --brew)   RUN_BREW=true ;;
@@ -59,6 +61,7 @@ while [[ $# -gt 0 ]]; do
     --git)    RUN_GIT=true ;;
     --uv)     RUN_UV=true ;;
     --custom) RUN_CUSTOM=true ;;
+    --zsh)    RUN_ZSH=true ;;
     -h|--help) usage; exit 0 ;;
     *) error "Невідомий аргумент: $1"; usage; exit 1 ;;
   esac
@@ -248,11 +251,33 @@ update_custom() {
   fi
 }
 
+update_zsh() {
+  [ -d "$HOME/.oh-my-zsh" ] || { warn "Oh My Zsh не знайдено, пропускаю"; return 0; }
+  info "Оновлення Oh My Zsh..."
+  git -C "$HOME/.oh-my-zsh" pull --ff-only 2>/dev/null || warn "Не вдалося оновити Oh My Zsh"
+
+  local ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+  local line repo plugin
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    [ -n "${line// }" ] || continue
+    repo="$line"
+    plugin="${repo##*/}"
+    if [ ! -d "$ZSH_CUSTOM/plugins/$plugin/.git" ]; then
+      info "Встановлення плагіна $plugin..."
+      git clone --depth 1 "https://github.com/$repo.git" "$ZSH_CUSTOM/plugins/$plugin"
+    else
+      info "Оновлення плагіна $plugin..."
+      git -C "$ZSH_CUSTOM/plugins/$plugin" pull --ff-only 2>/dev/null || warn "Не вдалося оновити $plugin"
+    fi
+  done < "$CONFIG_DIR/zsh-plugins.txt"
+}
+
 main() {
   if ! $RUN_APT && ! $RUN_ASDF && ! $RUN_BREW && ! $RUN_NVM \
-     && ! $RUN_GITHUB && ! $RUN_GITLAB && ! $RUN_GIT && ! $RUN_UV && ! $RUN_CUSTOM; then
+     && ! $RUN_GITHUB && ! $RUN_GITLAB && ! $RUN_GIT && ! $RUN_UV && ! $RUN_CUSTOM && ! $RUN_ZSH; then
     RUN_APT=true; RUN_ASDF=true; RUN_BREW=true; RUN_NVM=true
-    RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true
+    RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true; RUN_ZSH=true
     info "Без аргументів - оновлення всіх джерел"
   fi
 
@@ -266,6 +291,7 @@ main() {
   $RUN_GIT    && update_git
   $RUN_UV     && update_uv
   $RUN_CUSTOM && update_custom
+  $RUN_ZSH    && update_zsh
   info "Готово!"
 }
 

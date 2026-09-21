@@ -25,6 +25,7 @@ RUN_GITLAB=false
 RUN_GIT=false
 RUN_UV=false
 RUN_CUSTOM=false
+RUN_ZSH=false
 
 usage() {
   cat <<EOF
@@ -42,6 +43,7 @@ Sources:
   --git      клонування репозиторіїв (config/git.txt)
   --uv       Python CLI-інструменти (config/uv.txt)
   --custom   власні бінарники з custom-bin/ у /usr/local/bin
+  --zsh      Oh My Zsh + плагіни та тема (config/zsh-*)
   --all      всі перелічені джерела
   -h, --help показати цю підказку
 
@@ -52,7 +54,7 @@ EOF
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --all)    RUN_APT=true; RUN_ASDF=true; RUN_BREW=true; RUN_NVM=true
-              RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true ;;
+              RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true; RUN_ZSH=true ;;
     --apt)    RUN_APT=true ;;
     --asdf)   RUN_ASDF=true ;;
     --brew)   RUN_BREW=true ;;
@@ -62,6 +64,7 @@ while [[ $# -gt 0 ]]; do
     --git)    RUN_GIT=true ;;
     --uv)     RUN_UV=true ;;
     --custom) RUN_CUSTOM=true ;;
+    --zsh)    RUN_ZSH=true ;;
     -h|--help) usage; exit 0 ;;
     *) error "Невідомий аргумент: $1"; usage; exit 1 ;;
   esac
@@ -69,7 +72,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 if ! $RUN_APT && ! $RUN_ASDF && ! $RUN_BREW && ! $RUN_NVM \
-   && ! $RUN_GITHUB && ! $RUN_GITLAB && ! $RUN_GIT && ! $RUN_UV && ! $RUN_CUSTOM; then
+   && ! $RUN_GITHUB && ! $RUN_GITLAB && ! $RUN_GIT && ! $RUN_UV && ! $RUN_CUSTOM && ! $RUN_ZSH; then
   error "Вкажіть хоча б одне джерело або --all"
   usage
   exit 1
@@ -303,6 +306,70 @@ install_custom() {
   sudo chmod +x /usr/local/bin/* 2>/dev/null || true
 }
 
+zshrc_add_plugin() {
+  local name="$1" rc="$HOME/.zshrc"
+  [ -f "$rc" ] || return 0
+  grep -q '^plugins=(' "$rc" || return 0
+  local found
+  found="$(awk -v n="$name" '
+    /^plugins=\(/ { inblock=1 }
+    inblock && $0 ~ "(^|[[:space:]])" n "([[:space:]]|$)" { found=1 }
+    inblock && /^\)/ { exit }
+    END { print found+0 }
+  ' "$rc")"
+  if [ "$found" = "0" ]; then
+    awk -v name="  $name" '
+      /^plugins=\(/ { inblock=1 }
+      inblock && /^\)/ && !inserted { print name; inserted=1 }
+      { print }
+    ' "$rc" > "$rc.tmp" && mv "$rc.tmp" "$rc"
+  fi
+}
+
+install_zsh() {
+  command -v zsh >/dev/null 2>&1 || warn "zsh не встановлено — виконайте --apt"
+
+  local rc="$HOME/.zshrc"
+  if [ ! -d "$HOME/.oh-my-zsh" ]; then
+    info "Встановлення Oh My Zsh..."
+    sh -c "$(curl -fsSL https://raw.githubusercontent.com/ohmyzsh/ohmyzsh/master/tools/install.sh)" "" --unattended || true
+  fi
+
+  local theme
+  theme="$(grep -v '^#' "$CONFIG_DIR/zsh-theme" | head -1)"
+  theme="${theme// /}"
+  if [ -n "$theme" ] && grep -q '^ZSH_THEME=' "$rc"; then
+    info "Тема zsh: $theme"
+    sed -i "s/^ZSH_THEME=.*/ZSH_THEME=\"$theme\"/" "$rc"
+  fi
+
+  local ZSH_CUSTOM
+  ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+
+  local line repo plugin
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    [ -n "${line// }" ] || continue
+    repo="$line"
+    plugin="${repo##*/}"
+    if [ ! -d "$ZSH_CUSTOM/plugins/$plugin" ]; then
+      info "Встановлення плагіна $plugin..."
+      git clone --depth 1 "https://github.com/$repo.git" "$ZSH_CUSTOM/plugins/$plugin"
+    fi
+    zshrc_add_plugin "$plugin"
+  done < "$CONFIG_DIR/zsh-plugins.txt"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    [ -n "${line// }" ] || continue
+    zshrc_add_plugin "$line"
+  done < "$CONFIG_DIR/zsh-builtin-plugins.txt"
+
+  if [ "$(command -v zsh)" != "$SHELL" ]; then
+    command -v chsh >/dev/null 2>&1 && chsh -s "$(command -v zsh)" 2>/dev/null || warn "Не вдалося змінити shell на zsh (chsh)"
+  fi
+}
+
 main() {
   info "Початок налаштування системи: $(uname -srm)"
   $RUN_APT    && install_apt
@@ -314,6 +381,7 @@ main() {
   $RUN_GIT    && install_git
   $RUN_UV     && install_uv
   $RUN_CUSTOM && install_custom
+  $RUN_ZSH    && install_zsh
   info "Готово! Перезапустіть шелл або виконайте 'source ~/.zshrc'"
 }
 
