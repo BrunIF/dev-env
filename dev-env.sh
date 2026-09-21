@@ -16,6 +16,7 @@ TOOL_VERSIONS="${TOOL_VERSIONS:-$HOME/.tool-versions}"
 ASDF_DIR="${ASDF_DIR:-$HOME/.asdf}"
 NVM_DIR="${NVM_DIR:-$HOME/.nvm}"
 
+MODE=""
 RUN_APT=false
 RUN_ASDF=false
 RUN_BREW=false
@@ -29,32 +30,48 @@ RUN_ZSH=false
 
 usage() {
   cat <<EOF
-Usage: $0 [--all | джерела...]
+Usage: $0 {install|update} [--all | джерела...]
 
-Встановлює програмне забезпечення зі списків у config/.
+Встановлює або оновлює ПЗ зі списків у config/.
+
+  install  встановити (потрібно вказати джерело або --all)
+  update   оновити все встановлене (без аргументів - всі джерела)
 
 Sources:
-  --apt      пакети з config/apt.txt
+  --apt      пакети з config/apt.txt (install: apt-get install; update: upgrade)
   --asdf     asdf + плагіни/версії з ~/.tool-versions
   --brew     Homebrew-формули з config/brew.txt
   --nvm      Node.js (версія з config/node-version)
   --github   бінарники з GitHub Releases (config/github.txt)
   --gitlab   бінарники з GitLab Releases (config/gitlab.txt)
-  --git      клонування репозиторіїв (config/git.txt)
+  --git      клонування/оновлення репозиторіїв (config/git.txt)
   --uv       Python CLI-інструменти (config/uv.txt)
   --custom   власні бінарники з custom-bin/ у /usr/local/bin
   --zsh      Oh My Zsh + плагіни та тема (config/zsh-*)
-  --all      всі перелічені джерела
+  --all      всі джерела
   -h, --help показати цю підказку
 
-Приклад: $0 --asdf --nvm --github
+Приклади:
+  $0 install --all
+  $0 install --asdf --nvm --github --zsh
+  $0 update
+  $0 update --github --uv
 EOF
 }
 
-while [[ $# -gt 0 ]]; do
+no_sources_selected() {
+  ! $RUN_APT && ! $RUN_ASDF && ! $RUN_BREW && ! $RUN_NVM \
+    && ! $RUN_GITHUB && ! $RUN_GITLAB && ! $RUN_GIT && ! $RUN_UV && ! $RUN_CUSTOM && ! $RUN_ZSH
+}
+
+set_all() {
+  RUN_APT=true; RUN_ASDF=true; RUN_BREW=true; RUN_NVM=true
+  RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true
+  RUN_CUSTOM=true; RUN_ZSH=true
+}
+
+parse_source_flag() {
   case "$1" in
-    --all)    RUN_APT=true; RUN_ASDF=true; RUN_BREW=true; RUN_NVM=true
-              RUN_GITHUB=true; RUN_GITLAB=true; RUN_GIT=true; RUN_UV=true; RUN_CUSTOM=true; RUN_ZSH=true ;;
     --apt)    RUN_APT=true ;;
     --asdf)   RUN_ASDF=true ;;
     --brew)   RUN_BREW=true ;;
@@ -65,18 +82,11 @@ while [[ $# -gt 0 ]]; do
     --uv)     RUN_UV=true ;;
     --custom) RUN_CUSTOM=true ;;
     --zsh)    RUN_ZSH=true ;;
-    -h|--help) usage; exit 0 ;;
-    *) error "Невідомий аргумент: $1"; usage; exit 1 ;;
+    --all)    set_all ;;
+    *) return 1 ;;
   esac
-  shift
-done
-
-if ! $RUN_APT && ! $RUN_ASDF && ! $RUN_BREW && ! $RUN_NVM \
-   && ! $RUN_GITHUB && ! $RUN_GITLAB && ! $RUN_GIT && ! $RUN_UV && ! $RUN_CUSTOM && ! $RUN_ZSH; then
-  error "Вкажіть хоча б одне джерело або --all"
-  usage
-  exit 1
-fi
+  return 0
+}
 
 install_apt() {
   info "Встановлення apt-пакетів з config/apt.txt..."
@@ -87,6 +97,13 @@ install_apt() {
     [ -n "${line// }" ] && pkgs+=("$line")
   done < "$CONFIG_DIR/apt.txt"
   sudo apt-get install -y "${pkgs[@]}"
+}
+
+update_apt() {
+  info "Оновлення apt-пакетів..."
+  sudo apt-get update -y
+  sudo apt-get upgrade -y
+  sudo apt-get autoremove -y
 }
 
 install_asdf() {
@@ -123,6 +140,21 @@ install_asdf() {
   asdf reshim
 }
 
+update_asdf() {
+  [ -f "$ASDF_DIR/asdf.sh" ] || { warn "asdf не знайдено, пропускаю"; return 0; }
+  # shellcheck disable=SC1090
+  . "$ASDF_DIR/asdf.sh"
+  info "Оновлення asdf..."
+  asdf update 2>/dev/null || true
+  command -v brew >/dev/null 2>&1 && brew upgrade asdf 2>/dev/null || true
+  asdf plugin update --all 2>/dev/null || true
+  if [ -f "$HOME/.tool-versions" ]; then
+    info "Застосування версій з ~/.tool-versions..."
+    asdf install || warn "asdf install завершився з помилками, перевірте окремі плагіни"
+    asdf reshim
+  fi
+}
+
 install_brew() {
   if ! command -v brew >/dev/null 2>&1; then
     info "Встановлення Homebrew..."
@@ -136,6 +168,14 @@ install_brew() {
     b="$line"
     brew list --formula "$b" >/dev/null 2>&1 || brew install "$b"
   done < "$CONFIG_DIR/brew.txt"
+}
+
+update_brew() {
+  command -v brew >/dev/null 2>&1 || { warn "brew не знайдено, пропускаю"; return 0; }
+  info "Оновлення Homebrew..."
+  brew update
+  brew upgrade
+  brew cleanup --prune=all 2>/dev/null || true
 }
 
 install_node() {
@@ -153,6 +193,21 @@ install_node() {
   nvm install "$version" >/dev/null
   nvm alias default "$version" >/dev/null
   nvm use "$version" >/dev/null
+  info "Node: $(node --version), npm: $(npm --version)"
+}
+
+update_node() {
+  [ -s "$NVM_DIR/nvm.sh" ] || { warn "nvm не знайдено, пропускаю"; return 0; }
+  # shellcheck disable=SC1091
+  . "$NVM_DIR/nvm.sh"
+  local version
+  version="$(grep -v '^#' "$CONFIG_DIR/node-version" | head -1)"
+  version="${version// /}"
+  info "Оновлення Node.js до $version..."
+  nvm install "$version" >/dev/null
+  nvm alias default "$version" >/dev/null
+  nvm use "$version" >/dev/null
+  command -v npm >/dev/null 2>&1 && npm update -g 2>/dev/null || true
   info "Node: $(node --version), npm: $(npm --version)"
 }
 
@@ -184,7 +239,7 @@ install_asset() {
     return 1
   fi
   sudo install -m 0755 "$binpath" "/usr/local/bin/$bin"
-  info "Встановлено: /usr/local/bin/$bin"
+  info "/usr/local/bin/$bin: готово"
 }
 
 install_links() {
@@ -196,7 +251,8 @@ install_links() {
   done < <(printf '%s' "$links" | tr ',' '\n')
 }
 
-install_github() {
+sync_github() {
+  local force="$1"
   local line repo pat bin links json tag asset url
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
@@ -204,7 +260,7 @@ install_github() {
     IFS='|' read -r repo pat bin links <<< "$line"
     [ -n "${repo:-}" ] && [ -n "${bin:-}" ] || continue
 
-    if [ -e "/usr/local/bin/$bin" ]; then
+    if [ "$force" = "false" ] && command -v "$bin" >/dev/null 2>&1; then
       info "Пропускаю $bin (вже встановлено)"
       continue
     fi
@@ -222,21 +278,22 @@ install_github() {
       warn "Не знайдено асета '$pat' для $repo ($tag)"
       continue
     fi
-    info "Встановлення $bin ($tag) з $repo..."
+    info "$([ "$force" = "true" ] && echo "Оновлення" || echo "Встановлення") $bin ($tag) з $repo..."
     install_asset "https://github.com/$repo/releases/download/$tag/$asset" "$asset" "$bin"
     install_links "$bin" "$links"
   done < "$CONFIG_DIR/github.txt"
 }
 
-install_gitlab() {
-  local line repo pat bin proj json tag url name
+sync_gitlab() {
+  local force="$1"
+  local line repo pat bin proj json tag url
   while IFS= read -r line || [ -n "$line" ]; do
     line="${line%%#*}"
     [ -n "${line// }" ] || continue
     IFS='|' read -r repo pat bin <<< "$line"
     [ -n "${repo:-}" ] && [ -n "${bin:-}" ] || continue
 
-    if [ -e "/usr/local/bin/$bin" ]; then
+    if [ "$force" = "false" ] && command -v "$bin" >/dev/null 2>&1; then
       info "Пропускаю $bin (вже встановлено)"
       continue
     fi
@@ -253,12 +310,13 @@ install_gitlab() {
       warn "Не знайдено асета '$pat' для $repo ($tag)"
       continue
     fi
-    info "Встановлення $bin ($tag) з $repo..."
+    info "$([ "$force" = "true" ] && echo "Оновлення" || echo "Встановлення") $bin ($tag) з $repo..."
     install_asset "$url" "$(basename "$url")" "$bin"
   done < "$CONFIG_DIR/gitlab.txt"
 }
 
-install_git() {
+sync_git() {
+  local force="$1"
   local line url dir
   mkdir -p "$HOME/Development"
   while IFS= read -r line || [ -n "$line" ]; do
@@ -266,11 +324,20 @@ install_git() {
     [ -n "${line// }" ] || continue
     IFS='|' read -r url dir <<< "$line"
     [ -n "${url:-}" ] && [ -n "${dir:-}" ] || continue
-    if [ -d "$HOME/Development/$dir" ]; then
-      info "$dir вже існує, пропускаю"
+
+    local dest="$HOME/Development/$dir"
+    if [ -d "$dest/.git" ]; then
+      if [ "$force" = "true" ]; then
+        info "git pull у $dest..."
+        git -C "$dest" pull --ff-only || warn "не вдалося оновити $dir"
+      else
+        info "$dir вже існує, пропускаю"
+      fi
+    elif [ -d "$dest" ]; then
+      warn "$dir існує, але не є git-репозиторієм, пропускаю"
     else
-      info "Клонування $url → ~/Development/$dir"
-      git clone "$url" "$HOME/Development/$dir"
+      info "Клонування $url → $dest"
+      git clone "$url" "$dest"
     fi
   done < "$CONFIG_DIR/git.txt"
 }
@@ -296,12 +363,22 @@ install_uv() {
   done < "$CONFIG_DIR/uv.txt"
 }
 
-install_custom() {
+update_uv() {
+  command -v uv >/dev/null 2>&1 || { warn "uv не знайдено, пропускаю"; return 0; }
+  if [ "$(uv tool list 2>/dev/null | wc -l)" -eq 0 ]; then
+    warn "Немає встановлених uv-інструментів, пропускаю"
+    return 0
+  fi
+  info "Оновлення uv-інструментів..."
+  uv tool upgrade --all
+}
+
+sync_custom() {
   [ -d "$SCRIPT_DIR/custom-bin" ] || return 0
   local count
   count="$(ls -1 "$SCRIPT_DIR/custom-bin" 2>/dev/null | wc -l)"
   [ "$count" -eq 0 ] && return 0
-  info "Копіювання custom-bin/ у /usr/local/bin..."
+  info "Синхронізація custom-bin/ у /usr/local/bin..."
   sudo cp "$SCRIPT_DIR"/custom-bin/* /usr/local/bin/
   sudo chmod +x /usr/local/bin/* 2>/dev/null || true
 }
@@ -370,19 +447,98 @@ install_zsh() {
   fi
 }
 
-main() {
-  info "Початок налаштування системи: $(uname -srm)"
+update_zsh() {
+  [ -d "$HOME/.oh-my-zsh" ] || { warn "Oh My Zsh не знайдено, пропускаю"; return 0; }
+  info "Оновлення Oh My Zsh..."
+  git -C "$HOME/.oh-my-zsh" pull --ff-only 2>/dev/null || warn "Не вдалося оновити Oh My Zsh"
+
+  local ZSH_CUSTOM="${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}"
+  local line repo plugin
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line%%#*}"
+    [ -n "${line// }" ] || continue
+    repo="$line"
+    plugin="${repo##*/}"
+    if [ ! -d "$ZSH_CUSTOM/plugins/$plugin/.git" ]; then
+      info "Встановлення плагіна $plugin..."
+      git clone --depth 1 "https://github.com/$repo.git" "$ZSH_CUSTOM/plugins/$plugin"
+    else
+      info "Оновлення плагіна $plugin..."
+      git -C "$ZSH_CUSTOM/plugins/$plugin" pull --ff-only 2>/dev/null || warn "Не вдалося оновити $plugin"
+    fi
+  done < "$CONFIG_DIR/zsh-plugins.txt"
+}
+
+run_install() {
+  info "Початок встановлення: $(uname -srm)"
   $RUN_APT    && install_apt
   $RUN_ASDF   && install_asdf
   $RUN_BREW   && install_brew
   $RUN_NVM    && install_node
-  $RUN_GITHUB && install_github
-  $RUN_GITLAB && install_gitlab
-  $RUN_GIT    && install_git
+  $RUN_GITHUB && sync_github false
+  $RUN_GITLAB && sync_gitlab false
+  $RUN_GIT    && sync_git false
   $RUN_UV     && install_uv
-  $RUN_CUSTOM && install_custom
+  $RUN_CUSTOM && sync_custom
   $RUN_ZSH    && install_zsh
   info "Готово! Перезапустіть шелл або виконайте 'source ~/.zshrc'"
+}
+
+run_update() {
+  info "Початок оновлення: $(uname -srm)"
+  $RUN_APT    && update_apt
+  $RUN_ASDF   && update_asdf
+  $RUN_BREW   && update_brew
+  $RUN_NVM    && update_node
+  $RUN_GITHUB && sync_github true
+  $RUN_GITLAB && sync_gitlab true
+  $RUN_GIT    && sync_git true
+  $RUN_UV     && update_uv
+  $RUN_CUSTOM && sync_custom
+  $RUN_ZSH    && update_zsh
+  info "Готово!"
+}
+
+main() {
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      install) MODE="install"; shift; break ;;
+      update)  MODE="update"; shift; break ;;
+      -h|--help) usage; exit 0 ;;
+      *) error "Першим аргументом має бути install або update"; usage; exit 1 ;;
+    esac
+  done
+
+  if [ -z "$MODE" ]; then
+    error "Не вказано команду (install|update)"
+    usage
+    exit 1
+  fi
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -h|--help) usage; exit 0 ;;
+      *) parse_source_flag "$1" || { error "Невідомий параметр: $1"; usage; exit 1; } ;;
+    esac
+    shift
+  done
+
+  if [ "$MODE" = "install" ] && no_sources_selected; then
+    error "Вкажіть хоча б одне джерело або --all"
+    usage
+    exit 1
+  fi
+
+  if [ "$MODE" = "update" ] && no_sources_selected; then
+    warn "Без аргументів - оновлення всіх джерел"
+    set_all
+  fi
+
+  if [ "$MODE" = "install" ]; then
+    run_install
+  else
+    run_update
+  fi
 }
 
 main "$@"
