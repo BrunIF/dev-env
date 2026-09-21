@@ -1,0 +1,5 @@
+# Формат: <owner/repo>|<glob-зразок асета>|<ім'я бінарника>|<симлінки через кому>
+# Зразок - glob по імені асета релізу (ластка для ОС/архітектури).
+# Архіви (tar.gz/zip) розпаковуються автоматично, бінарник шукається за ім'ям.
+arduino/arduino-cli|arduino-cli_*_Linux_64bit.tar.gz|arduino-cli|
+k3s-io/k3s|k3s|k3s|crictl,ctr

@@ -1,0 +1,5 @@
+# Homebrew-формули: один на рядок, '#' - коментар
+doggo
+jless
+nushell
+etcd

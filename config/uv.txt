@@ -1,0 +1,8 @@
+# Python CLI-інструменти через uv tool: один на рядок, '#' - коментар
+ipython
+jupyterlab
+yt-dlp
+speedtest-cli
+tinytuya
+httpx
+mutagen

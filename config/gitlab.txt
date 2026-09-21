@@ -1,0 +1,4 @@
+# Формат: <namespace/project>|<glob-зразок асета>|<ім'я бінарника>
+# Зразок зіставляється з іменем ассета релізу (assets.links.name).
+# Приклад:
+# owner/project|*_linux_amd64*|toolname
