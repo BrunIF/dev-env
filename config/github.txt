@@ -3,3 +3,9 @@
 # Архіви (tar.gz/zip) розпаковуються автоматично, бінарник шукається за ім'ям.
 arduino/arduino-cli|arduino-cli_*_Linux_64bit.tar.gz|arduino-cli|
 k3s-io/k3s|k3s|k3s|crictl,ctr
+BurntSushi/ripgrep|ripgrep-*-x86_64-unknown-linux-musl.tar.gz|rg|
+getsops/sops|sops-v*.linux.amd64|sops|
+FiloSottile/age|age-v*-linux-amd64.tar.gz|age|
+aquasecurity/trivy|trivy_*_Linux-64bit.tar.gz|trivy|
+grafana/k6|k6-v*-linux-amd64.tar.gz|k6|
+go-task/task|task_linux_amd64.tar.gz|task|

@@ -6,3 +6,4 @@ speedtest-cli
 tinytuya
 httpx
 mutagen
+ansible
