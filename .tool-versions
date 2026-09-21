@@ -1,0 +1,11 @@
+nerdctl system
+kubectl 1.32.1
+k3s 1.31.5+k3s1
+k9s 0.50.9
+kustomize 5.5.0
+awscli 2.32.19
+xh 0.25.3
+uv 0.12.5
+supabase-cli 2.115.0
+gcloud 580.0.0
+fx 35.0.0
